@@ -368,8 +368,8 @@ func (ui *UI) Run() error {
 	// Add empty space to match metrics width
 	inputAreaFlex.AddItem(nil, 26, 0, false)
 
-	// Add the content flex to main container
-	flex.AddItem(contentFlex, 0, 1, false)
+	// Add the content flex to main container with more weight
+	flex.AddItem(contentFlex, 0, 8, false)
 	flex.AddItem(inputAreaFlex, 1, 0, true)
 
 	// Add keybind display with fixed height
@@ -391,16 +391,16 @@ func (ui *UI) Run() error {
 		}
 	}()
 
-	// Center the entire flex container
+	// Center the entire flex container with less padding
 	centered := tview.NewFlex().
 		AddItem(nil, 0, 1, false).
 		AddItem(
 			tview.NewFlex().
 				SetDirection(tview.FlexRow).
 				AddItem(nil, 0, 1, false).
-				AddItem(flex, 0, 3, true).
+				AddItem(flex, 0, 20, true).  // Increased weight from 3 to 20
 				AddItem(nil, 0, 1, false),
-			0, 3, true,
+			0, 20, true,  // Increased weight from 3 to 20
 		).
 		AddItem(nil, 0, 1, false)
 
