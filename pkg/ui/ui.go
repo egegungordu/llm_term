@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"llm_term/pkg/chat"
@@ -40,6 +41,10 @@ func New() *UI {
 		types.NormalMode: {
 			{Key: "q", Description: "quit"},
 			{Key: "i", Description: "enter input mode"},
+			{Key: "j", Description: "scroll down"},
+			{Key: "k", Description: "scroll up"},
+			{Key: "Ctrl+D", Description: "scroll down half page"},
+			{Key: "Ctrl+U", Description: "scroll up half page"},
 		},
 		types.InputMode: {
 			{Key: "Esc", Description: "enter normal mode"},
@@ -57,7 +62,8 @@ func (ui *UI) setupViews() {
 	ui.chatView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetScrollable(true).
-		SetWordWrap(true)
+		SetWordWrap(true).
+		ScrollToEnd()
 	ui.chatView.SetBorder(true).
 		SetTitle("Chat").
 		SetTitleAlign(tview.AlignLeft)
@@ -71,7 +77,8 @@ func (ui *UI) setupViews() {
 	// Create mode and keybinds display
 	ui.keybindView = tview.NewTextView().
 		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft)
+		SetTextAlign(tview.AlignLeft).
+		SetWordWrap(true)
 	ui.keybindView.SetBorder(false)
 }
 
@@ -113,6 +120,23 @@ func (ui *UI) setupHandlers() {
 	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch ui.currentMode {
 		case types.NormalMode:
+			// Handle Ctrl+D and Ctrl+U
+			if event.Key() == tcell.KeyCtrlD {
+				_, _, _, height := ui.chatView.GetInnerRect()
+				row, _ := ui.chatView.GetScrollOffset()
+				ui.chatView.ScrollTo(row+height/2, 0)
+				return nil
+			} else if event.Key() == tcell.KeyCtrlU {
+				_, _, _, height := ui.chatView.GetInnerRect()
+				row, _ := ui.chatView.GetScrollOffset()
+				newRow := row - height/2
+				if newRow < 0 {
+					newRow = 0
+				}
+				ui.chatView.ScrollTo(newRow, 0)
+				return nil
+			}
+
 			switch event.Rune() {
 			case 'q':
 				ui.app.Stop()
@@ -120,6 +144,16 @@ func (ui *UI) setupHandlers() {
 			case 'i':
 				ui.currentMode = types.InputMode
 				ui.updateKeybindDisplay()
+				return nil
+			case 'j': // Scroll down
+				row, _ := ui.chatView.GetScrollOffset()
+				ui.chatView.ScrollTo(row+1, 0)
+				return nil
+			case 'k': // Scroll up
+				row, _ := ui.chatView.GetScrollOffset()
+				if row > 0 {
+					ui.chatView.ScrollTo(row-1, 0)
+				}
 				return nil
 			}
 		case types.InputMode:
@@ -138,60 +172,65 @@ func (ui *UI) updateModeState() {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
 		ui.app.SetFocus(nil) // Remove focus from input field
-		if ui.isAIResponding {
-			ui.inputField.SetLabel(fmt.Sprintf("[yellow]AI responding %s[white] > ", ui.spinnerFrames[ui.currentSpinnerFrame]))
-		} else {
-			ui.inputField.SetLabel("> ")
-		}
 	} else {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
-		ui.inputField.SetLabel("> ")
 		ui.app.SetFocus(ui.inputField)
 	}
 }
 
 func (ui *UI) updateKeybindDisplay() {
 	ui.keybindView.Clear()
-	modeText := "[yellow]Mode: "
-	if ui.currentMode == types.NormalMode {
-		modeText += "NORMAL[white]"
-	} else {
-		modeText += "INPUT[white]"
-	}
-
-	fmt.Fprintf(ui.keybindView, "%s    ", modeText)
 	
-	// Display keybinds for current mode
+	// Display keybinds for current mode in a grid
 	binds := ui.modeKeybinds[ui.currentMode]
-	for i, bind := range binds {
-		fmt.Fprintf(ui.keybindView, "[green]%s[white]:%s", bind.Key, bind.Description)
-		if i < len(binds)-1 {
-			fmt.Fprintf(ui.keybindView, " | ")
+	bindsPerRow := 2  // Reduce to 2 bindings per row for better visibility
+	
+	// First pass: calculate max widths for alignment
+	maxKeyWidth := 0
+	maxDescWidth := 0
+	for _, bind := range binds {
+		if len(bind.Key) > maxKeyWidth {
+			maxKeyWidth = len(bind.Key)
+		}
+		if len(bind.Description) > maxDescWidth {
+			maxDescWidth = len(bind.Description)
 		}
 	}
+	
+	// Second pass: display bindings in a grid
+	for i := 0; i < len(binds); i += bindsPerRow {
+		for j := 0; j < bindsPerRow && i+j < len(binds); j++ {
+			bind := binds[i+j]
+			// Pad the key and description for alignment
+			keyPadding := strings.Repeat(" ", maxKeyWidth-len(bind.Key))
+			descPadding := strings.Repeat(" ", maxDescWidth-len(bind.Description))
+			
+			fmt.Fprintf(ui.keybindView, "[green]%s%s[white]:%s%s", 
+				bind.Key, 
+				keyPadding,
+				bind.Description,
+				descPadding,
+			)
+			
+			// Add spacing between columns, except for the last column
+			if j < bindsPerRow-1 && i+j < len(binds)-1 {
+				fmt.Fprintf(ui.keybindView, "        ")  // More spacing between columns
+			}
+		}
+		fmt.Fprintf(ui.keybindView, "\n")  // Always add newline after each row
+	}
+	
 	ui.updateModeState()
 }
 
-func (ui *UI) startSpinner() {
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		
-		for {
-			select {
-			case <-ui.stopSpinner:
-				return
-			case <-ticker.C:
-				ui.app.QueueUpdateDraw(func() {
-					ui.currentSpinnerFrame = (ui.currentSpinnerFrame + 1) % len(ui.spinnerFrames)
-					if ui.isAIResponding {
-						ui.inputField.SetLabel(fmt.Sprintf("[yellow]AI responding %s[white] > ", ui.spinnerFrames[ui.currentSpinnerFrame]))
-					}
-				})
-			}
-		}
-	}()
+func (ui *UI) getModeText() string {
+	if ui.isAIResponding {
+		return fmt.Sprintf("[yellow]AI responding %s[white]", ui.spinnerFrames[ui.currentSpinnerFrame])
+	} else if ui.currentMode == types.NormalMode {
+		return "[yellow]NORMAL MODE[white]"
+	}
+	return "[yellow]INPUT MODE[white]"
 }
 
 func (ui *UI) Run() error {
@@ -202,11 +241,29 @@ func (ui *UI) Run() error {
 	// Add chat view with weight 1
 	flex.AddItem(ui.chatView, 0, 1, false)
 
-	// Add input field
-	flex.AddItem(ui.inputField, 1, 0, true)
+	// Create input row with mode indicator
+	inputFlex := tview.NewFlex().
+		AddItem(ui.inputField, 0, 2, true).
+		AddItem(tview.NewTextView().
+			SetDynamicColors(true).
+			SetTextAlign(tview.AlignRight), 20, 0, false)
+	
+	// Update mode text periodically
+	go func() {
+		for {
+			ui.app.QueueUpdateDraw(func() {
+				modeView := inputFlex.GetItem(1).(*tview.TextView)
+				modeView.Clear()
+				fmt.Fprintf(modeView, "%s", ui.getModeText())
+			})
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
 
-	// Add keybind display
-	flex.AddItem(ui.keybindView, 1, 0, false)
+	flex.AddItem(inputFlex, 1, 0, true)
+
+	// Add keybind display with fixed height
+	flex.AddItem(ui.keybindView, 6, 0, false)  // Fixed height of 6 lines
 
 	// Center the entire flex container
 	centered := tview.NewFlex().
@@ -225,4 +282,22 @@ func (ui *UI) Run() error {
 	ui.updateKeybindDisplay()
 
 	return ui.app.SetRoot(centered, true).EnableMouse(true).Run()
+}
+
+func (ui *UI) startSpinner() {
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ui.stopSpinner:
+				return
+			case <-ticker.C:
+				ui.app.QueueUpdateDraw(func() {
+					ui.currentSpinnerFrame = (ui.currentSpinnerFrame + 1) % len(ui.spinnerFrames)
+				})
+			}
+		}
+	}()
 } 
