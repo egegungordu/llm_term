@@ -6,15 +6,38 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"llm_term/pkg/types"
 
+	"github.com/joho/godotenv"
 	"github.com/rivo/tview"
 )
 
+func init() {
+	// Load .env file if it exists
+	godotenv.Load()
+}
+
+func getConfig() (endpoint string, model string) {
+	endpoint = os.Getenv("LLM_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://167.235.207.146:11434/api/chat" // fallback default
+	}
+	
+	model = os.Getenv("LLM_MODEL")
+	if model == "" {
+		model = "llama3.2" // fallback default
+	}
+	
+	return endpoint, model
+}
+
 func StreamChat(text string, chatView *tview.TextView, app *tview.Application, onComplete func()) {
+	endpoint, model := getConfig()
+	
 	request := types.ChatRequest{
-		Model:       "llama3.2",
+		Model:       model,
 		Temperature: 1,
 		Messages: []types.Message{
 			{
@@ -30,7 +53,7 @@ func StreamChat(text string, chatView *tview.TextView, app *tview.Application, o
 		return
 	}
 
-	resp, err := http.Post("http://167.235.207.146:11434/api/chat", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Fprintf(chatView, "[red]Error: %v\n", err)
 		return
