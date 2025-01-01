@@ -24,6 +24,7 @@ type UI struct {
 	currentSpinnerFrame int
 	stopSpinner chan bool
 	chat        *chat.Chat
+	autoScroll  bool
 }
 
 func New() *UI {
@@ -35,6 +36,7 @@ func New() *UI {
 		currentSpinnerFrame: 0,
 		stopSpinner: make(chan bool),
 		chat:        chat.New(),
+		autoScroll:  true,
 	}
 
 	ui.modeKeybinds = map[types.Mode][]types.KeyBinding{
@@ -43,12 +45,23 @@ func New() *UI {
 			{Key: "i", Description: "enter input mode"},
 			{Key: "j", Description: "scroll down"},
 			{Key: "k", Description: "scroll up"},
+			{Key: "gg", Description: "scroll to top"},
+			{Key: "G", Description: "scroll to bottom"},
 			{Key: "Ctrl+D", Description: "scroll down half page"},
 			{Key: "Ctrl+U", Description: "scroll up half page"},
 		},
 		types.InputMode: {
 			{Key: "Esc", Description: "enter normal mode"},
 			{Key: "Enter", Description: "send message"},
+		},
+		types.ResponseMode: {
+			{Key: "q", Description: "quit"},
+			{Key: "j", Description: "scroll down"},
+			{Key: "k", Description: "scroll up"},
+			{Key: "gg", Description: "scroll to top"},
+			{Key: "G", Description: "scroll to bottom"},
+			{Key: "Ctrl+D", Description: "scroll down half page"},
+			{Key: "Ctrl+U", Description: "scroll up half page"},
 		},
 	}
 
@@ -71,7 +84,9 @@ func (ui *UI) setupViews() {
 	// Create input field
 	ui.inputField = tview.NewInputField().
 		SetLabel("> ").
-		SetFieldWidth(0)
+		SetFieldWidth(0).
+		SetFieldBackgroundColor(tcell.ColorDefault).
+		SetFieldTextColor(tcell.ColorDefault)
 	ui.inputField.SetBorder(false)
 
 	// Create mode and keybinds display
@@ -83,6 +98,66 @@ func (ui *UI) setupViews() {
 }
 
 func (ui *UI) setupHandlers() {
+	lastKeyTime := time.Now()
+	lastKey := ' '
+
+	handleScrollCommand := func(event *tcell.EventKey) *tcell.EventKey {
+		// Handle Ctrl+D and Ctrl+U
+		if event.Key() == tcell.KeyCtrlD {
+			_, _, _, height := ui.chatView.GetInnerRect()
+			row, _ := ui.chatView.GetScrollOffset()
+			ui.chatView.ScrollTo(row+height/2, 0)
+			ui.autoScroll = false
+			return nil
+		} else if event.Key() == tcell.KeyCtrlU {
+			_, _, _, height := ui.chatView.GetInnerRect()
+			row, _ := ui.chatView.GetScrollOffset()
+			newRow := row - height/2
+			if newRow < 0 {
+				newRow = 0
+			}
+			ui.chatView.ScrollTo(newRow, 0)
+			ui.autoScroll = false
+			return nil
+		}
+
+		switch event.Rune() {
+		case 'g':
+			// Check if this is a double 'g' within 500ms
+			if lastKey == 'g' && time.Since(lastKeyTime) < 500*time.Millisecond {
+				ui.chatView.ScrollToBeginning()
+				ui.autoScroll = false
+				lastKey = ' ' // Reset last key
+				return nil
+			}
+			lastKey = 'g'
+			lastKeyTime = time.Now()
+			return nil
+		case 'G':
+			ui.chatView.ScrollToEnd()
+			ui.autoScroll = true
+			return nil
+		case 'j': // Scroll down
+			row, _ := ui.chatView.GetScrollOffset()
+			ui.chatView.ScrollTo(row+1, 0)
+			ui.autoScroll = false
+			return nil
+		case 'k': // Scroll up
+			row, _ := ui.chatView.GetScrollOffset()
+			if row > 0 {
+				ui.chatView.ScrollTo(row-1, 0)
+				ui.autoScroll = false
+			}
+			return nil
+		case 'q':
+			ui.app.Stop()
+			return nil
+		}
+		lastKey = event.Rune()
+		lastKeyTime = time.Now()
+		return event
+	}
+
 	// Handle input
 	ui.inputField.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEnter && ui.currentMode == types.InputMode {
@@ -96,13 +171,14 @@ func (ui *UI) setupHandlers() {
 				return
 			}
 			
+			ui.autoScroll = true // Reset auto-scroll when sending message
 			fmt.Fprintf(ui.chatView, "[yellow]You:[white] %s\n", text)
 			ui.inputField.SetText("")
 			ui.chatView.ScrollToEnd()
 			
 			// Set responding flag and update UI
 			ui.isAIResponding = true
-			ui.updateModeState()
+			ui.setMode(types.ResponseMode)
 			ui.startSpinner()
 			
 			// Call the streaming chat function
@@ -110,56 +186,45 @@ func (ui *UI) setupHandlers() {
 				ui.app.QueueUpdateDraw(func() {
 					ui.stopSpinner <- true
 					ui.isAIResponding = false
-					ui.updateModeState()
+					// Return to input mode after response
+					ui.setMode(types.InputMode)
+					ui.autoScroll = true // Reset auto-scroll when returning to input mode
+					ui.chatView.ScrollToEnd()
 				})
 			})
+		}
+	})
+
+	// Add mouse handler for scroll wheel
+	ui.chatView.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		if action == tview.MouseScrollUp || action == tview.MouseScrollDown {
+			ui.autoScroll = false
+		}
+		return action, event
+	})
+
+	// Add change handler for chat view to handle manual scrolling
+	ui.chatView.SetChangedFunc(func() {
+		if ui.autoScroll {
+			ui.chatView.ScrollToEnd()
 		}
 	})
 
 	// Global key handler
 	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch ui.currentMode {
+		case types.ResponseMode:
+			return handleScrollCommand(event)
 		case types.NormalMode:
-			// Handle Ctrl+D and Ctrl+U
-			if event.Key() == tcell.KeyCtrlD {
-				_, _, _, height := ui.chatView.GetInnerRect()
-				row, _ := ui.chatView.GetScrollOffset()
-				ui.chatView.ScrollTo(row+height/2, 0)
-				return nil
-			} else if event.Key() == tcell.KeyCtrlU {
-				_, _, _, height := ui.chatView.GetInnerRect()
-				row, _ := ui.chatView.GetScrollOffset()
-				newRow := row - height/2
-				if newRow < 0 {
-					newRow = 0
-				}
-				ui.chatView.ScrollTo(newRow, 0)
+			if event.Rune() == 'i' {
+				ui.setMode(types.InputMode)
+				ui.autoScroll = true // Reset auto-scroll when entering input mode
 				return nil
 			}
-
-			switch event.Rune() {
-			case 'q':
-				ui.app.Stop()
-				return nil
-			case 'i':
-				ui.currentMode = types.InputMode
-				ui.updateKeybindDisplay()
-				return nil
-			case 'j': // Scroll down
-				row, _ := ui.chatView.GetScrollOffset()
-				ui.chatView.ScrollTo(row+1, 0)
-				return nil
-			case 'k': // Scroll up
-				row, _ := ui.chatView.GetScrollOffset()
-				if row > 0 {
-					ui.chatView.ScrollTo(row-1, 0)
-				}
-				return nil
-			}
+			return handleScrollCommand(event)
 		case types.InputMode:
 			if event.Key() == tcell.KeyEscape {
-				ui.currentMode = types.NormalMode
-				ui.updateKeybindDisplay()
+				ui.setMode(types.NormalMode)
 				return nil
 			}
 		}
@@ -168,7 +233,7 @@ func (ui *UI) setupHandlers() {
 }
 
 func (ui *UI) updateModeState() {
-	if ui.currentMode == types.NormalMode || ui.isAIResponding {
+	if ui.currentMode == types.NormalMode || ui.currentMode == types.ResponseMode {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
 		ui.app.SetFocus(nil) // Remove focus from input field
@@ -177,6 +242,12 @@ func (ui *UI) updateModeState() {
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
 		ui.app.SetFocus(ui.inputField)
 	}
+}
+
+func (ui *UI) setMode(mode types.Mode) {
+	ui.currentMode = mode
+	ui.updateModeState()
+	ui.updateKeybindDisplay()
 }
 
 func (ui *UI) updateKeybindDisplay() {
@@ -220,17 +291,17 @@ func (ui *UI) updateKeybindDisplay() {
 		}
 		fmt.Fprintf(ui.keybindView, "\n")  // Always add newline after each row
 	}
-	
-	ui.updateModeState()
 }
 
 func (ui *UI) getModeText() string {
-	if ui.isAIResponding {
+	switch ui.currentMode {
+	case types.ResponseMode:
 		return fmt.Sprintf("[yellow]AI responding %s[white]", ui.spinnerFrames[ui.currentSpinnerFrame])
-	} else if ui.currentMode == types.NormalMode {
+	case types.NormalMode:
 		return "[yellow]NORMAL MODE[white]"
+	default:
+		return "[yellow]INPUT MODE[white]"
 	}
-	return "[yellow]INPUT MODE[white]"
 }
 
 func (ui *UI) Run() error {
@@ -300,4 +371,13 @@ func (ui *UI) startSpinner() {
 			}
 		}
 	}()
+}
+
+func (ui *UI) updateChat(text string) {
+	ui.app.QueueUpdateDraw(func() {
+		fmt.Fprintf(ui.chatView, "%s", text)
+		if ui.autoScroll {
+			ui.chatView.ScrollToEnd()
+		}
+	})
 } 

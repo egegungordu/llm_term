@@ -5,6 +5,7 @@ type Mode int
 const (
 	NormalMode Mode = iota
 	InputMode
+	ResponseMode
 )
 
 type KeyBinding struct {

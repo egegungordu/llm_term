@@ -91,7 +91,9 @@ func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Appl
 	defer resp.Body.Close()
 
 	decoder := json.NewDecoder(resp.Body)
-	fmt.Fprintf(chatView, "[green]AI:[white] ")
+	app.QueueUpdateDraw(func() {
+		fmt.Fprintf(chatView, "[green]AI:[white] ")
+	})
 	
 	var assistantMessage types.Message
 	assistantMessage.Role = "assistant"
@@ -108,7 +110,6 @@ func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Appl
 
 		app.QueueUpdateDraw(func() {
 			fmt.Fprintf(chatView, "%s", response.Message.Content)
-			chatView.ScrollToEnd()
 		})
 
 		assistantMessage.Content += response.Message.Content
@@ -123,7 +124,6 @@ func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Appl
 	
 	app.QueueUpdateDraw(func() {
 		fmt.Fprintf(chatView, "\n")
-		chatView.ScrollToEnd()
 	})
 	
 	if onComplete != nil {
