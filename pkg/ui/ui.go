@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"llm_term/pkg/chat"
+	"llm_term/pkg/system"
 	"llm_term/pkg/types"
 
 	"github.com/gdamore/tcell/v2"
@@ -17,6 +18,7 @@ type UI struct {
 	chatView    *tview.TextView
 	inputField  *tview.InputField
 	keybindView *tview.TextView
+	metricsView *tview.TextView
 	currentMode types.Mode
 	modeKeybinds map[types.Mode][]types.KeyBinding
 	isAIResponding bool
@@ -25,6 +27,7 @@ type UI struct {
 	stopSpinner chan bool
 	chat        *chat.Chat
 	autoScroll  bool
+	metrics     *system.Metrics
 	// Performance metrics
 	totalTokens int
 	totalDuration float64
@@ -41,6 +44,7 @@ func New() *UI {
 		stopSpinner: make(chan bool),
 		chat:        chat.New(),
 		autoScroll:  true,
+		metrics:     system.New(),
 	}
 
 	ui.modeKeybinds = map[types.Mode][]types.KeyBinding{
@@ -92,6 +96,12 @@ func (ui *UI) setupViews() {
 		SetFieldBackgroundColor(tcell.ColorDefault).
 		SetFieldTextColor(tcell.ColorDefault)
 	ui.inputField.SetBorder(false)
+
+	// Create metrics view
+	ui.metricsView = tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
+	ui.metricsView.SetBorder(false)
 
 	// Create mode and keybinds display
 	ui.keybindView = tview.NewTextView().
@@ -316,12 +326,27 @@ func (ui *UI) getModeText() string {
 }
 
 func (ui *UI) Run() error {
-	// Create flex container for layout
+	// Start system metrics collection
+	ui.metrics.Start()
+	defer ui.metrics.Stop()
+
+	// Create main flex container for layout
 	flex := tview.NewFlex().
 		SetDirection(tview.FlexRow)
 
-	// Add chat view with weight 1
-	flex.AddItem(ui.chatView, 0, 1, false)
+	// Create horizontal flex for chat and metrics
+	contentFlex := tview.NewFlex().
+		SetDirection(tview.FlexColumn)
+
+	// Add chat view with weight 4
+	contentFlex.AddItem(ui.chatView, 0, 4, false)
+
+	// Add metrics view with fixed width
+	contentFlex.AddItem(ui.metricsView, 26, 0, false)
+
+	// Create a flex for input area that matches chat width
+	inputAreaFlex := tview.NewFlex().
+		SetDirection(tview.FlexColumn)
 
 	// Create input row with mode indicator
 	inputFlex := tview.NewFlex().
@@ -329,23 +354,34 @@ func (ui *UI) Run() error {
 		AddItem(tview.NewTextView().
 			SetDynamicColors(true).
 			SetTextAlign(tview.AlignRight), 20, 0, false)
-	
-	// Update mode text periodically
+
+	// Add input flex to match chat width
+	inputAreaFlex.AddItem(inputFlex, 0, 4, true)
+	// Add empty space to match metrics width
+	inputAreaFlex.AddItem(nil, 26, 0, false)
+
+	// Add the content flex to main container
+	flex.AddItem(contentFlex, 0, 1, false)
+	flex.AddItem(inputAreaFlex, 1, 0, true)
+
+	// Add keybind display with fixed height
+	flex.AddItem(ui.keybindView, 6, 0, false)  // Fixed height of 6 lines
+
+	// Update mode text and metrics periodically
 	go func() {
 		for {
 			ui.app.QueueUpdateDraw(func() {
 				modeView := inputFlex.GetItem(1).(*tview.TextView)
 				modeView.Clear()
 				fmt.Fprintf(modeView, "%s", ui.getModeText())
+
+				// Update metrics view with padding
+				ui.metricsView.Clear()
+				fmt.Fprintf(ui.metricsView, "%s", ui.metrics.GetFormattedMetrics(0))
 			})
 			time.Sleep(100 * time.Millisecond)
 		}
 	}()
-
-	flex.AddItem(inputFlex, 1, 0, true)
-
-	// Add keybind display with fixed height
-	flex.AddItem(ui.keybindView, 6, 0, false)  // Fixed height of 6 lines
 
 	// Center the entire flex container
 	centered := tview.NewFlex().
@@ -406,13 +442,12 @@ func (ui *UI) updatePerformanceMetrics(response types.ChatResponse) {
 		
 		// Calculate tokens per second using the formula: totalTokens / totalDurationSecs
 		tokPerSec := float64(totalTokens) / totalDurationSecs
+
+		// Update metrics with model info
+		ui.metrics.SetModelMetrics(ui.currentModel, tokPerSec)
 		
 		ui.app.QueueUpdateDraw(func() {
-			title := fmt.Sprintf("Chat (%s | %.2f tok/s)", 
-				ui.currentModel,
-				tokPerSec,
-			)
-			ui.chatView.SetTitle(title)
+			ui.chatView.SetTitle("Chat")
 		})
 	}
 } 
