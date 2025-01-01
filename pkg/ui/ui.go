@@ -76,7 +76,12 @@ func (ui *UI) setupViews() {
 func (ui *UI) setupHandlers() {
 	// Handle input
 	ui.inputField.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter && ui.currentMode == types.InputMode && !ui.isAIResponding {
+		if key == tcell.KeyEnter && ui.currentMode == types.InputMode {
+			// Block new messages while AI is responding
+			if ui.isAIResponding {
+				return
+			}
+			
 			text := ui.inputField.GetText()
 			if text == "" {
 				return
@@ -104,10 +109,6 @@ func (ui *UI) setupHandlers() {
 
 	// Global key handler
 	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if ui.isAIResponding {
-			return nil // Block all input while AI is responding
-		}
-		
 		switch ui.currentMode {
 		case types.NormalMode:
 			switch event.Rune() {
