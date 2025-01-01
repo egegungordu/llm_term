@@ -25,7 +25,14 @@ type ChatRequest struct {
 }
 
 type ChatResponse struct {
-	Model   string  `json:"model"`
-	Message Message `json:"message"`
-	Done    bool    `json:"done"`
+	Model              string  `json:"model"`
+	Message            Message `json:"message"`
+	Done               bool    `json:"done"`
+	DoneReason         string  `json:"done_reason"`
+	TotalDuration      int64   `json:"total_duration"`
+	LoadDuration       int64   `json:"load_duration"`
+	PromptEvalCount    int     `json:"prompt_eval_count"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration"`
+	EvalCount          int     `json:"eval_count"`
+	EvalDuration       int64   `json:"eval_duration"`
 }

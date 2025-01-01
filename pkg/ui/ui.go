@@ -25,6 +25,10 @@ type UI struct {
 	stopSpinner chan bool
 	chat        *chat.Chat
 	autoScroll  bool
+	// Performance metrics
+	totalTokens int
+	totalDuration float64
+	currentModel string
 }
 
 func New() *UI {
@@ -181,17 +185,22 @@ func (ui *UI) setupHandlers() {
 			ui.setMode(types.ResponseMode)
 			ui.startSpinner()
 			
-			// Call the streaming chat function
-			go ui.chat.StreamChat(text, ui.chatView, ui.app, func() {
-				ui.app.QueueUpdateDraw(func() {
-					ui.stopSpinner <- true
-					ui.isAIResponding = false
-					// Return to input mode after response
-					ui.setMode(types.InputMode)
-					ui.autoScroll = true // Reset auto-scroll when returning to input mode
-					ui.chatView.ScrollToEnd()
-				})
-			})
+			// Call the streaming chat function with response handler
+			go ui.chat.StreamChat(text, ui.chatView, ui.app, 
+				func(response types.ChatResponse) {
+					ui.updatePerformanceMetrics(response)
+				},
+				func() {
+					ui.app.QueueUpdateDraw(func() {
+						ui.stopSpinner <- true
+						ui.isAIResponding = false
+						// Return to input mode after response
+						ui.setMode(types.InputMode)
+						ui.autoScroll = true // Reset auto-scroll when returning to input mode
+						ui.chatView.ScrollToEnd()
+					})
+				},
+			)
 		}
 	})
 
@@ -380,4 +389,28 @@ func (ui *UI) updateChat(text string) {
 			ui.chatView.ScrollToEnd()
 		}
 	})
+}
+
+func (ui *UI) updatePerformanceMetrics(response types.ChatResponse) {
+	if response.Done && response.EvalCount > 0 {
+		// Store current model
+		ui.currentModel = response.Model
+		
+		// Total tokens = prompt tokens + completion tokens
+		totalTokens := response.PromptEvalCount + response.EvalCount
+		
+		// Total duration in seconds (convert from nanoseconds)
+		totalDurationSecs := float64(response.TotalDuration) / 1e9
+		
+		// Calculate tokens per second using the formula: totalTokens / totalDurationSecs
+		tokPerSec := float64(totalTokens) / totalDurationSecs
+		
+		ui.app.QueueUpdateDraw(func() {
+			title := fmt.Sprintf("Chat (%s | %.2f tok/s)", 
+				ui.currentModel,
+				tokPerSec,
+			)
+			ui.chatView.SetTitle(title)
+		})
+	}
 } 

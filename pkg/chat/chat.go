@@ -55,7 +55,7 @@ func getConfig() (endpoint string, model string, err error) {
 	return endpoint, model, nil
 }
 
-func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Application, onComplete func()) {
+func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Application, onResponse func(types.ChatResponse), onComplete func()) {
 	endpoint, model, err := getConfig()
 	if err != nil {
 		fmt.Fprintf(chatView, "[red]Configuration Error: %v\n[yellow]Please set the required environment variables in your .env file.[white]\n", err)
@@ -113,6 +113,10 @@ func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Appl
 		})
 
 		assistantMessage.Content += response.Message.Content
+		
+		if onResponse != nil {
+			onResponse(response)
+		}
 
 		if response.Done {
 			break
