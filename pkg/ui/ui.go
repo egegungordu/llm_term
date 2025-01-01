@@ -28,9 +28,6 @@ type UI struct {
 	chat        *chat.Chat
 	autoScroll  bool
 	metrics     *system.Metrics
-	// Performance metrics
-	totalTokens int
-	totalDuration float64
 	currentModel string
 }
 
@@ -80,7 +77,8 @@ func New() *UI {
 
 func (ui *UI) setupViews() {
 	// Create chat text view
-	ui.chatView = tview.NewTextView().
+	ui.chatView = tview.NewTextView()
+	ui.chatView.
 		SetDynamicColors(true).
 		SetScrollable(true).
 		SetWordWrap(true).
@@ -88,13 +86,28 @@ func (ui *UI) setupViews() {
 	ui.chatView.SetBorder(true).
 		SetTitle("Chat").
 		SetTitleAlign(tview.AlignLeft)
+	
+	// Disable mouse and keyboard interaction
+	ui.chatView.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		return 0, nil // Ignore all mouse events
+	})
+	ui.chatView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		return nil // Ignore all keyboard events
+	})
+	// Make the chat view non-focusable
+	ui.chatView.SetBlurFunc(func() {})
+	ui.chatView.SetFocusFunc(func() {
+		ui.app.SetFocus(ui.inputField) // Redirect focus to input field
+	})
 
 	// Create input field
 	ui.inputField = tview.NewInputField().
 		SetLabel("> ").
 		SetFieldWidth(0).
 		SetFieldBackgroundColor(tcell.ColorDefault).
-		SetFieldTextColor(tcell.ColorDefault)
+		SetFieldTextColor(tcell.ColorDefault).
+		SetPlaceholderStyle(tcell.StyleDefault.Background(tcell.ColorDefault).Foreground(tcell.ColorDefault)).
+		SetPlaceholder(" ") // Use space as placeholder to prevent cursor
 	ui.inputField.SetBorder(false)
 
 	// Create metrics view
@@ -263,13 +276,17 @@ func (ui *UI) updateModeState() {
 	if ui.currentMode == types.NormalMode || ui.currentMode == types.ResponseMode {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
-		ui.app.SetFocus(nil) // Remove focus from input field
 		ui.inputField.SetDisabled(true) // Disable input when not in input mode
+		// Hide cursor and label in non-input modes
+		ui.inputField.SetText(" ") // Set space to prevent cursor
+		ui.app.SetFocus(nil)
 	} else {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetDisabled(false) // Enable input in input mode
 		ui.app.SetFocus(ui.inputField)
+		// Show cursor and label in input mode
+		ui.inputField.SetText("") // Clear the space
 	}
 }
 
@@ -386,6 +403,11 @@ func (ui *UI) Run() error {
 				// Update metrics view with padding
 				ui.metricsView.Clear()
 				fmt.Fprintf(ui.metricsView, "%s", ui.metrics.GetFormattedMetrics(0))
+
+				// Ensure input field maintains focus in input mode
+				if ui.currentMode == types.InputMode {
+					ui.app.SetFocus(ui.inputField)
+				}
 			})
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -398,9 +420,9 @@ func (ui *UI) Run() error {
 			tview.NewFlex().
 				SetDirection(tview.FlexRow).
 				AddItem(nil, 0, 1, false).
-				AddItem(flex, 0, 20, true).  // Increased weight from 3 to 20
+				AddItem(flex, 0, 20, true).
 				AddItem(nil, 0, 1, false),
-			0, 20, true,  // Increased weight from 3 to 20
+			0, 20, true,
 		).
 		AddItem(nil, 0, 1, false)
 
@@ -426,15 +448,6 @@ func (ui *UI) startSpinner() {
 			}
 		}
 	}()
-}
-
-func (ui *UI) updateChat(text string) {
-	ui.app.QueueUpdateDraw(func() {
-		fmt.Fprintf(ui.chatView, "%s", text)
-		if ui.autoScroll {
-			ui.chatView.ScrollToEnd()
-		}
-	})
 }
 
 func (ui *UI) updatePerformanceMetrics(response types.ChatResponse) {
