@@ -14,6 +14,28 @@ import (
 	"github.com/rivo/tview"
 )
 
+// Maximum number of messages to keep in history
+const maxHistorySize = 100
+
+type Chat struct {
+	history []types.Message
+}
+
+func New() *Chat {
+	return &Chat{
+		history: make([]types.Message, 0),
+	}
+}
+
+func (c *Chat) addToHistory(message types.Message) {
+	c.history = append(c.history, message)
+	
+	// Trim history if it exceeds max size
+	if len(c.history) > maxHistorySize {
+		c.history = c.history[len(c.history)-maxHistorySize:]
+	}
+}
+
 func init() {
 	// Load .env file if it exists
 	godotenv.Load()
@@ -33,7 +55,7 @@ func getConfig() (endpoint string, model string, err error) {
 	return endpoint, model, nil
 }
 
-func StreamChat(text string, chatView *tview.TextView, app *tview.Application, onComplete func()) {
+func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Application, onComplete func()) {
 	endpoint, model, err := getConfig()
 	if err != nil {
 		fmt.Fprintf(chatView, "[red]Configuration Error: %v\n[yellow]Please set the required environment variables in your .env file.[white]\n", err)
@@ -42,16 +64,17 @@ func StreamChat(text string, chatView *tview.TextView, app *tview.Application, o
 		}
 		return
 	}
+
+	userMessage := types.Message{
+		Role:    "user",
+		Content: text,
+	}
+	c.addToHistory(userMessage)
 	
 	request := types.ChatRequest{
 		Model:       model,
 		Temperature: 1,
-		Messages: []types.Message{
-			{
-				Role:    "user",
-				Content: text,
-			},
-		},
+		Messages:    c.history,
 	}
 
 	jsonData, err := json.Marshal(request)
@@ -70,6 +93,9 @@ func StreamChat(text string, chatView *tview.TextView, app *tview.Application, o
 	decoder := json.NewDecoder(resp.Body)
 	fmt.Fprintf(chatView, "[green]AI:[white] ")
 	
+	var assistantMessage types.Message
+	assistantMessage.Role = "assistant"
+	
 	for {
 		var response types.ChatResponse
 		if err := decoder.Decode(&response); err != nil {
@@ -85,10 +111,15 @@ func StreamChat(text string, chatView *tview.TextView, app *tview.Application, o
 			chatView.ScrollToEnd()
 		})
 
+		assistantMessage.Content += response.Message.Content
+
 		if response.Done {
 			break
 		}
 	}
+	
+	// Add the complete assistant message to history
+	c.addToHistory(assistantMessage)
 	
 	app.QueueUpdateDraw(func() {
 		fmt.Fprintf(chatView, "\n")

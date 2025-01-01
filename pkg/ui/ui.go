@@ -22,6 +22,7 @@ type UI struct {
 	spinnerFrames []string
 	currentSpinnerFrame int
 	stopSpinner chan bool
+	chat        *chat.Chat
 }
 
 func New() *UI {
@@ -32,6 +33,7 @@ func New() *UI {
 		spinnerFrames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		currentSpinnerFrame: 0,
 		stopSpinner: make(chan bool),
+		chat:        chat.New(),
 	}
 
 	ui.modeKeybinds = map[types.Mode][]types.KeyBinding{
@@ -97,7 +99,7 @@ func (ui *UI) setupHandlers() {
 			ui.startSpinner()
 			
 			// Call the streaming chat function
-			go chat.StreamChat(text, ui.chatView, ui.app, func() {
+			go ui.chat.StreamChat(text, ui.chatView, ui.app, func() {
 				ui.app.QueueUpdateDraw(func() {
 					ui.stopSpinner <- true
 					ui.isAIResponding = false
