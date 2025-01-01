@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 
 	"llm_term/pkg/types"
 
@@ -19,12 +20,25 @@ const maxHistorySize = 100
 
 type Chat struct {
 	history []types.Message
+	cancelChan chan struct{}
+	mu sync.Mutex
+	isStreaming bool
 }
 
 func New() *Chat {
 	return &Chat{
 		history: make([]types.Message, 0),
+		cancelChan: make(chan struct{}),
 	}
+}
+
+func (c *Chat) Cancel() {
+	c.mu.Lock()
+	if c.isStreaming {
+		close(c.cancelChan)
+		c.isStreaming = false
+	}
+	c.mu.Unlock()
 }
 
 func (c *Chat) addToHistory(message types.Message) {
@@ -56,12 +70,25 @@ func getConfig() (endpoint string, model string, err error) {
 }
 
 func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Application, onResponse func(types.ChatResponse), onComplete func()) {
-	endpoint, model, err := getConfig()
-	if err != nil {
-		fmt.Fprintf(chatView, "[red]Configuration Error: %v\n[yellow]Please set the required environment variables in your .env file.[white]\n", err)
+	// Create new cancel channel for this stream
+	c.mu.Lock()
+	c.cancelChan = make(chan struct{})
+	c.isStreaming = true
+	c.mu.Unlock()
+
+	// Ensure we mark streaming as done when we exit
+	defer func() {
+		c.mu.Lock()
+		c.isStreaming = false
+		c.mu.Unlock()
 		if onComplete != nil {
 			onComplete()
 		}
+	}()
+
+	endpoint, model, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(chatView, "[red]Configuration Error: %v\n[yellow]Please set the required environment variables in your .env file.[white]\n", err)
 		return
 	}
 
@@ -98,28 +125,37 @@ func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Appl
 	var assistantMessage types.Message
 	assistantMessage.Role = "assistant"
 	
+	streamLoop:
 	for {
-		var response types.ChatResponse
-		if err := decoder.Decode(&response); err != nil {
-			if err == io.EOF {
-				break
-			}
-			fmt.Fprintf(chatView, "[red]Error: %v\n", err)
+		select {
+		case <-c.cancelChan:
+			app.QueueUpdateDraw(func() {
+				fmt.Fprintf(chatView, "\n[yellow]Response cancelled by user[white]\n")
+			})
 			return
-		}
+		default:
+			var response types.ChatResponse
+			if err := decoder.Decode(&response); err != nil {
+				if err == io.EOF {
+					break streamLoop
+				}
+				fmt.Fprintf(chatView, "[red]Error: %v\n", err)
+				return
+			}
 
-		app.QueueUpdateDraw(func() {
-			fmt.Fprintf(chatView, "%s", response.Message.Content)
-		})
+			app.QueueUpdateDraw(func() {
+				fmt.Fprintf(chatView, "%s", response.Message.Content)
+			})
 
-		assistantMessage.Content += response.Message.Content
-		
-		if onResponse != nil {
-			onResponse(response)
-		}
+			assistantMessage.Content += response.Message.Content
+			
+			if onResponse != nil {
+				onResponse(response)
+			}
 
-		if response.Done {
-			break
+			if response.Done {
+				break streamLoop
+			}
 		}
 	}
 	
@@ -129,8 +165,4 @@ func (c *Chat) StreamChat(text string, chatView *tview.TextView, app *tview.Appl
 	app.QueueUpdateDraw(func() {
 		fmt.Fprintf(chatView, "\n")
 	})
-	
-	if onComplete != nil {
-		onComplete()
-	}
 } 

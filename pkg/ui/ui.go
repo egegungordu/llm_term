@@ -201,14 +201,7 @@ func (ui *UI) setupHandlers() {
 					ui.updatePerformanceMetrics(response)
 				},
 				func() {
-					ui.app.QueueUpdateDraw(func() {
-						ui.stopSpinner <- true
-						ui.isAIResponding = false
-						// Return to input mode after response
-						ui.setMode(types.InputMode)
-						ui.autoScroll = true // Reset auto-scroll when returning to input mode
-						ui.chatView.ScrollToEnd()
-					})
+					ui.handleResponseComplete()
 				},
 			)
 		}
@@ -231,6 +224,17 @@ func (ui *UI) setupHandlers() {
 
 	// Global key handler
 	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Handle Ctrl+C globally
+		if event.Key() == tcell.KeyCtrlC {
+			if ui.isAIResponding {
+				// Cancel AI response
+				ui.chat.Cancel()
+				return nil
+			}
+			// In other modes, ignore Ctrl+C
+			return nil
+		}
+
 		switch ui.currentMode {
 		case types.ResponseMode:
 			return handleScrollCommand(event)
@@ -249,6 +253,10 @@ func (ui *UI) setupHandlers() {
 		}
 		return event
 	})
+
+	// Add keybind for Ctrl+C to response mode
+	ui.modeKeybinds[types.ResponseMode] = append(ui.modeKeybinds[types.ResponseMode],
+		types.KeyBinding{Key: "Ctrl+C", Description: "cancel response"})
 }
 
 func (ui *UI) updateModeState() {
@@ -450,4 +458,14 @@ func (ui *UI) updatePerformanceMetrics(response types.ChatResponse) {
 			ui.chatView.SetTitle("Chat")
 		})
 	}
+}
+
+func (ui *UI) handleResponseComplete() {
+	ui.app.QueueUpdateDraw(func() {
+		ui.stopSpinner <- true
+		ui.isAIResponding = false
+		ui.setMode(types.InputMode)
+		ui.autoScroll = true
+		ui.chatView.ScrollToEnd()
+	})
 } 
