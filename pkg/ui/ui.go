@@ -246,9 +246,11 @@ func (ui *UI) updateModeState() {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
 		ui.app.SetFocus(nil) // Remove focus from input field
+		ui.inputField.SetDisabled(true) // Disable input when not in input mode
 	} else {
 		ui.inputField.SetBackgroundColor(tcell.ColorDefault)
 		ui.inputField.SetFieldBackgroundColor(tcell.ColorDefault)
+		ui.inputField.SetDisabled(false) // Enable input in input mode
 		ui.app.SetFocus(ui.inputField)
 	}
 }
