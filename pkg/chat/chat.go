@@ -19,22 +19,29 @@ func init() {
 	godotenv.Load()
 }
 
-func getConfig() (endpoint string, model string) {
+func getConfig() (endpoint string, model string, err error) {
 	endpoint = os.Getenv("LLM_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "http://167.235.207.146:11434/api/chat" // fallback default
+		return "", "", fmt.Errorf("LLM_ENDPOINT environment variable is not set")
 	}
 	
 	model = os.Getenv("LLM_MODEL")
 	if model == "" {
-		model = "llama3.2" // fallback default
+		return "", "", fmt.Errorf("LLM_MODEL environment variable is not set")
 	}
 	
-	return endpoint, model
+	return endpoint, model, nil
 }
 
 func StreamChat(text string, chatView *tview.TextView, app *tview.Application, onComplete func()) {
-	endpoint, model := getConfig()
+	endpoint, model, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(chatView, "[red]Configuration Error: %v\n[yellow]Please set the required environment variables in your .env file.[white]\n", err)
+		if onComplete != nil {
+			onComplete()
+		}
+		return
+	}
 	
 	request := types.ChatRequest{
 		Model:       model,
