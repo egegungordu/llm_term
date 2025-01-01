@@ -36,12 +36,12 @@ func New() *UI {
 
 	ui.modeKeybinds = map[types.Mode][]types.KeyBinding{
 		types.NormalMode: {
-			{"q", "quit"},
-			{"i", "enter input mode"},
+			{Key: "q", Description: "quit"},
+			{Key: "i", Description: "enter input mode"},
 		},
 		types.InputMode: {
-			{"Esc", "enter normal mode"},
-			{"Enter", "send message"},
+			{Key: "Esc", Description: "enter normal mode"},
+			{Key: "Enter", Description: "send message"},
 		},
 	}
 
