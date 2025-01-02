@@ -81,12 +81,15 @@ func (ui *UI) setupViews() {
 	ui.chatView.
 		SetDynamicColors(true).
 		SetScrollable(true).
-		SetWordWrap(true).
-		ScrollToEnd()
+		SetWordWrap(true)
 	ui.chatView.SetBorder(true).
 		SetTitle("Chat").
 		SetTitleAlign(tview.AlignLeft)
 	
+	// Set initial scroll state
+	ui.autoScroll = true
+	ui.chatView.ScrollToEnd()
+
 	// Disable mouse and keyboard interaction
 	ui.chatView.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
 		return 0, nil // Ignore all mouse events
@@ -212,6 +215,12 @@ func (ui *UI) setupHandlers() {
 			go ui.chat.StreamChat(text, ui.chatView, ui.app, 
 				func(response types.ChatResponse) {
 					ui.updatePerformanceMetrics(response)
+					// Ensure we keep scrolling during response if auto-scroll is enabled
+					if ui.autoScroll {
+						ui.app.QueueUpdateDraw(func() {
+							ui.chatView.ScrollToEnd()
+						})
+					}
 				},
 				func() {
 					ui.handleResponseComplete()
