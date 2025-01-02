@@ -38,7 +38,7 @@ func New() *UI {
 		isAIResponding: false,
 		spinnerFrames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		currentSpinnerFrame: 0,
-		stopSpinner: make(chan bool),
+		stopSpinner: make(chan bool, 1),
 		chat:        chat.New(),
 		autoScroll:  true,
 		metrics:     system.New(),
@@ -474,8 +474,14 @@ func (ui *UI) updatePerformanceMetrics(response types.ChatResponse) {
 }
 
 func (ui *UI) handleResponseComplete() {
+	// Send stop signal to spinner without blocking
+	select {
+	case ui.stopSpinner <- true:
+	default:
+		// Channel is full or closed, ignore
+	}
+
 	ui.app.QueueUpdateDraw(func() {
-		ui.stopSpinner <- true
 		ui.isAIResponding = false
 		ui.setMode(types.InputMode)
 		ui.autoScroll = true
